@@ -1,0 +1,33 @@
+name: Diagnose Stage5G R1 package assembly
+
+on:
+  push:
+    branches:
+      - ops/stage5g-r1-acceptance-harness
+    paths:
+      - .stage5g-upload/TRIGGER
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record assembly diagnostics
+        shell: bash
+        run: |
+          set -u
+          cat .stage5g-upload/zip/part-* > /tmp/stage5g-r1.zip
+          {
+            echo "size=$(wc -c < /tmp/stage5g-r1.zip)"
+            echo "sha256=$(sha256sum /tmp/stage5g-r1.zip | awk '{print $1}')"
+            echo "git_blob=$(git hash-object /tmp/stage5g-r1.zip)"
+            unzip -t /tmp/stage5g-r1.zip
+          } > .stage5g-upload/diagnostic.txt 2>&1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .stage5g-upload/diagnostic.txt
+          git commit -m 'diagnostic: record package assembly result'
+          git push origin HEAD:ops/stage5g-r1-acceptance-harness
