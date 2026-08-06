@@ -1,0 +1,70 @@
+name: Finalize Stage5G R1 acceptance package
+
+on:
+  push:
+    branches:
+      - ops/stage5g-r1-acceptance-harness
+    paths:
+      - .stage5g-upload/TRIGGER3
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create exact one-commit package branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee /tmp/stage5g-finalize.log) 2>&1
+
+          readonly BASE_SHA='590e184b286cec8725e427bf635abc43d5ca4faf'
+          readonly BRANCH='ops/stage5g-r1-acceptance-harness'
+          readonly TARGET='acceptance/stage5g-r1-server2'
+          readonly ZIP_FILE="$TARGET/stage5g-r1-bootstrap-correction.zip"
+          readonly UNPACK='/tmp/stage5g-r1-unpack'
+
+          rm -rf "$TARGET" "$UNPACK"
+          mkdir -p "$TARGET" "$UNPACK"
+          cat .stage5g-upload/zip/part-* > "$ZIP_FILE"
+          test "$(wc -c < "$ZIP_FILE")" = '31035'
+          test "$(sha256sum "$ZIP_FILE" | awk '{print $1}')" = 'cd89e06651b3c84069e59fb2617751968944cafce4b94950c87f2945c390ea35'
+          test "$(git hash-object "$ZIP_FILE")" = 'c3e0d756d9d6dc274f567ab55498572e45e4597c'
+
+          unzip -q "$ZIP_FILE" -d "$UNPACK"
+          cp -a "$UNPACK/stage5g-r1-bootstrap-correction/." "$TARGET/"
+
+          cat > /tmp/expected.sha256 <<'SUMS'
+          5c71d35ca44107e488871b0d7e80a6d9d60d6b9d36269650a0a85c273d60e6e2  run_acceptance.sh
+          bbdada5ce7ecf7cc9a3e32533e4d7143aa2c9746725cffa613c5b242441a35d1  cleanup.sh
+          77deefa07343cd95dd74579170222993e388207158a036bf6bec1c8cf23916f3  create_acceptance_harness_command.txt
+          c97cb65cc476d632b2a41bc504de8659bc4f838562a1c1ddad99d751b072f47a  run_acceptance_bootstrap.diff
+          e3e628eca1efe7da4af8a21556af4a3e6356c17c892aef25a0a5f137bf4086a1  run_acceptance.pre_fix.reference.sh
+          0715e00bead556c393bd4172b083eccfa2c7a508dbf61c97f448a29e4b24f3e5  verification_report.txt
+          6664a5a5821715f9cf9d4211b72980e8106bbc7b5c9cbbca29417aaad5071be8  SHA256SUMS
+          cd89e06651b3c84069e59fb2617751968944cafce4b94950c87f2945c390ea35  stage5g-r1-bootstrap-correction.zip
+          SUMS
+          (cd "$TARGET" && sha256sum -c /tmp/expected.sha256)
+
+          rm -rf .github .stage5g-upload .stage5g-diagnostic .stage5g-probe
+          git add -A
+
+          export GIT_AUTHOR_NAME='github-actions[bot]'
+          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
+          tree_sha="$(git write-tree)"
+          final_sha="$(printf '%s\n' 'ops: add Stage 5G-R1 server2 acceptance harness' | git commit-tree "$tree_sha" -p "$BASE_SHA")"
+
+          test "$(git rev-parse "$final_sha^")" = "$BASE_SHA"
+          test "$(git diff --name-status "$BASE_SHA" "$final_sha" | awk '$1 != "A" {bad=1} END {print bad+0}')" = '0'
+          test "$(git diff --name-only "$BASE_SHA" "$final_sha" | wc -l)" = '8'
+
+          git push --force origin "$final_sha:refs/heads/$BRANCH"
